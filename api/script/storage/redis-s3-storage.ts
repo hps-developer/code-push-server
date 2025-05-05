@@ -404,7 +404,6 @@ export class RedisS3Storage implements storage.Storage {
   }
 
   public getPackageHistoryFromDeploymentKey(deploymentKey: string): Promise<storage.Package[]> {
-    console.log(this.deploymentKeyToDeploymentMap);
     const deploymentId: string = this.deploymentKeyToDeploymentMap[deploymentKey];
     if (!deploymentId || !this.deployments[deploymentId]) {
       return RedisS3Storage.getRejectedPromise(storage.ErrorCode.NotFound);
@@ -547,7 +546,10 @@ export class RedisS3Storage implements storage.Storage {
           .then(() => {
             resolve(blobId);
           })
-          .catch(reject);
+          .catch((e) => {
+            console.log(e);
+            reject(e);
+          });
       })
       .then(() => {
         this.blobs[blobId] = `https://${process.env.AWS_BUCKET_NAME}.s3.amazonaws.com/${blobId}`;
