@@ -50,3 +50,4 @@ JsonStorage.json
 __azurite_db_*
 __blobstorage__
 __queuestorage__
+.idea
