@@ -148,7 +148,8 @@ export function getAcquisitionRouter(config: AcquisitionConfig): express.Router 
       let fromCache: boolean = true;
       let redisError: Error;
 
-      q(redisManager.getCachedResponse(key, url))
+      redisManager
+        .getCachedResponse(key, url)
         .catch((error: Error) => {
           // Store the redis error to be thrown after we send response.
           redisError = error;
@@ -223,11 +224,14 @@ export function getAcquisitionRouter(config: AcquisitionConfig): express.Router 
       let redisUpdatePromise: q.Promise<void>;
 
       if (req.body.label && req.body.status === redis.DEPLOYMENT_FAILED) {
-        redisUpdatePromise = q(redisManager.incrementLabelStatusCount(deploymentKey, req.body.label, req.body.status));
+        redisUpdatePromise = redisManager.incrementLabelStatusCount(deploymentKey, req.body.label, req.body.status);
       } else {
         const labelOrAppVersion: string = req.body.label || appVersion;
-        redisUpdatePromise = q(
-          redisManager.recordUpdate(deploymentKey, labelOrAppVersion, previousDeploymentKey, previousLabelOrAppVersion)
+        redisUpdatePromise = redisManager.recordUpdate(
+          deploymentKey,
+          labelOrAppVersion,
+          previousDeploymentKey,
+          previousLabelOrAppVersion
         );
       }
 
@@ -248,7 +252,8 @@ export function getAcquisitionRouter(config: AcquisitionConfig): express.Router 
         );
       }
 
-      return q(redisManager.getCurrentActiveLabel(deploymentKey, clientUniqueId))
+      return redisManager
+        .getCurrentActiveLabel(deploymentKey, clientUniqueId)
         .then((currentVersionLabel: string) => {
           if (req.body.label && req.body.label !== currentVersionLabel) {
             return redisManager.incrementLabelStatusCount(deploymentKey, req.body.label, req.body.status).then(() => {
@@ -276,7 +281,8 @@ export function getAcquisitionRouter(config: AcquisitionConfig): express.Router 
         "A download status report must contain a valid deploymentKey and package label."
       );
     }
-    return q(redisManager.incrementLabelStatusCount(deploymentKey, req.body.label, redis.DOWNLOADED))
+    return redisManager
+      .incrementLabelStatusCount(deploymentKey, req.body.label, redis.DOWNLOADED)
       .then(() => {
         res.sendStatus(200);
       })
