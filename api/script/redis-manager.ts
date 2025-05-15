@@ -53,15 +53,15 @@ export class RedisManager {
 
   constructor() {
     if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
-      const redisConfig: RedisOptions = {
-        host: process.env.REDIS_HOST,
-        port: parseInt(process.env.REDIS_PORT),
-        password: process.env.REDIS_KEY,
-        tls: { rejectUnauthorized: true },
-      };
+      // const redisConfig: RedisOptions = {
+      //   host: process.env.REDIS_HOST,
+      //   port: parseInt(process.env.REDIS_PORT),
+      //   password: process.env.REDIS_KEY,
+      //   tls: { rejectUnauthorized: true },
+      // };
 
-      this._opsClient = new Redis(redisConfig);
-      this._metricsClient = new Redis({ ...redisConfig, db: RedisManager.METRICS_DB });
+      this._opsClient = new Redis();
+      this._metricsClient = new Redis({ db: RedisManager.METRICS_DB });
 
       this._opsClient.on("error", console.error);
       this._metricsClient.on("error", console.error);
