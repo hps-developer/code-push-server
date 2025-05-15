@@ -52,25 +52,25 @@ export class RedisManager {
   private _isEnabled: boolean;
 
   constructor() {
-    if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
-      // const redisConfig: RedisOptions = {
-      //   host: process.env.REDIS_HOST,
-      //   port: parseInt(process.env.REDIS_PORT),
-      //   password: process.env.REDIS_KEY,
-      //   tls: { rejectUnauthorized: true },
-      // };
+    // if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
+    // const redisConfig: RedisOptions = {
+    //   host: process.env.REDIS_HOST,
+    //   port: parseInt(process.env.REDIS_PORT),
+    //   password: process.env.REDIS_KEY,
+    //   tls: { rejectUnauthorized: true },
+    // };
 
-      this._opsClient = new Redis();
-      this._metricsClient = new Redis({ db: RedisManager.METRICS_DB });
+    this._opsClient = new Redis();
+    this._metricsClient = new Redis({ db: RedisManager.METRICS_DB });
 
-      this._opsClient.on("error", console.error);
-      this._metricsClient.on("error", console.error);
+    this._opsClient.on("error", console.error);
+    this._metricsClient.on("error", console.error);
 
-      this._isEnabled = true;
-    } else {
-      console.warn("No REDIS_HOST or REDIS_PORT environment variable configured.");
-      this._isEnabled = false;
-    }
+    this._isEnabled = true;
+    // } else {
+    //   console.warn("No REDIS_HOST or REDIS_PORT environment variable configured.");
+    //   this._isEnabled = false;
+    // }
   }
 
   get isEnabled(): boolean {
