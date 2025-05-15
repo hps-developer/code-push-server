@@ -1,7 +1,5 @@
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
 import Redis, { RedisOptions } from "ioredis";
+import * as Q from "q";
 
 export const DEPLOYMENT_SUCCEEDED = "DeploymentSucceeded";
 export const DEPLOYMENT_FAILED = "DeploymentFailed";
@@ -52,14 +50,6 @@ export class RedisManager {
   private _isEnabled: boolean;
 
   constructor() {
-    // if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
-    // const redisConfig: RedisOptions = {
-    //   host: process.env.REDIS_HOST,
-    //   port: parseInt(process.env.REDIS_PORT),
-    //   password: process.env.REDIS_KEY,
-    //   tls: { rejectUnauthorized: true },
-    // };
-
     this._opsClient = new Redis();
     this._metricsClient = new Redis({ db: RedisManager.METRICS_DB });
 
@@ -67,76 +57,102 @@ export class RedisManager {
     this._metricsClient.on("error", console.error);
 
     this._isEnabled = true;
-    // } else {
-    //   console.warn("No REDIS_HOST or REDIS_PORT environment variable configured.");
-    //   this._isEnabled = false;
-    // }
   }
 
   get isEnabled(): boolean {
     return this._isEnabled;
   }
 
-  async checkHealth(): Promise<void> {
-    if (!this.isEnabled) throw new Error("Redis manager is not enabled");
-    await Promise.all([this._opsClient.ping(), this._metricsClient.ping()]);
+  checkHealth(): Q.Promise<void> {
+    if (!this.isEnabled) return Q.reject(new Error("Redis manager is not enabled"));
+
+    return Q.all([Q(this._opsClient.ping()), Q(this._metricsClient.ping())]).then(() => {});
   }
 
-  async getCachedResponse(expiryKey: string, url: string): Promise<CacheableResponse | null> {
-    if (!this.isEnabled) return null;
+  getCachedResponse(expiryKey: string, url: string): Q.Promise<CacheableResponse | null> {
+    if (!this.isEnabled) return Q.resolve(null);
 
-    const serialized = await this._opsClient.hget(expiryKey, url);
-    return serialized ? JSON.parse(serialized) : null;
+    return Q.Promise((resolve, reject) => {
+      this._opsClient
+        .hget(expiryKey, url)
+        .then((serialized) => {
+          if (serialized) {
+            try {
+              resolve(JSON.parse(serialized));
+            } catch (err) {
+              reject(err);
+            }
+          } else {
+            resolve(null);
+          }
+        })
+        .catch(reject);
+    });
   }
 
-  async setCachedResponse(expiryKey: string, url: string, response: CacheableResponse): Promise<void> {
-    if (!this.isEnabled) return;
+  setCachedResponse(expiryKey: string, url: string, response: CacheableResponse): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
-    const serialized = JSON.stringify(response);
-    const isNewKey = !(await this._opsClient.exists(expiryKey));
-    await this._opsClient.hset(expiryKey, url, serialized);
-    if (isNewKey) {
-      await this._opsClient.expire(expiryKey, RedisManager.DEFAULT_EXPIRY);
-    }
+    return Q.Promise(async (resolve, reject) => {
+      try {
+        const serialized = JSON.stringify(response);
+        const isNewKey = !(await this._opsClient.exists(expiryKey));
+        await this._opsClient.hset(expiryKey, url, serialized);
+        if (isNewKey) {
+          await this._opsClient.expire(expiryKey, RedisManager.DEFAULT_EXPIRY);
+        }
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 
-  async incrementLabelStatusCount(deploymentKey: string, label: string, status: string): Promise<void> {
-    if (!this.isEnabled) return;
+  incrementLabelStatusCount(deploymentKey: string, label: string, status: string): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
     const hash = Utilities.getDeploymentKeyLabelsHash(deploymentKey);
     const field = Utilities.getLabelStatusField(label, status);
-    if (field) await this._metricsClient.hincrby(hash, field, 1);
+    if (!field) return Q.resolve();
+
+    return Q(this._metricsClient.hincrby(hash, field, 1)).then(() => {});
   }
 
-  async clearMetricsForDeploymentKey(deploymentKey: string): Promise<void> {
-    if (!this.isEnabled) return;
+  clearMetricsForDeploymentKey(deploymentKey: string): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
-    await this._metricsClient.del(
-      Utilities.getDeploymentKeyLabelsHash(deploymentKey),
-      Utilities.getDeploymentKeyClientsHash(deploymentKey)
-    );
+    return Q(
+      this._metricsClient.del(
+        Utilities.getDeploymentKeyLabelsHash(deploymentKey),
+        Utilities.getDeploymentKeyClientsHash(deploymentKey)
+      )
+    ).then(() => {});
   }
 
-  async getMetricsWithDeploymentKey(deploymentKey: string): Promise<DeploymentMetrics | null> {
-    if (!this.isEnabled) return null;
+  getMetricsWithDeploymentKey(deploymentKey: string): Q.Promise<DeploymentMetrics | null> {
+    if (!this.isEnabled) return Q.resolve(null);
 
-    const rawMetrics = await this._metricsClient.hgetall(Utilities.getDeploymentKeyLabelsHash(deploymentKey));
-    const parsed: DeploymentMetrics = {};
-
-    for (const key in rawMetrics) {
-      parsed[key] = parseInt(rawMetrics[key], 10);
-    }
-
-    return parsed;
+    return Q.Promise((resolve, reject) => {
+      this._metricsClient
+        .hgetall(Utilities.getDeploymentKeyLabelsHash(deploymentKey))
+        .then((rawMetrics) => {
+          const parsed: DeploymentMetrics = {};
+          for (const key in rawMetrics) {
+            parsed[key] = parseInt(rawMetrics[key], 10);
+          }
+          resolve(parsed);
+        })
+        .catch(reject);
+    });
   }
 
-  async recordUpdate(
+  recordUpdate(
     currentDeploymentKey: string,
     currentLabel: string,
     previousDeploymentKey?: string,
     previousLabel?: string
-  ): Promise<void> {
-    if (!this.isEnabled) return;
+  ): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
     const multi = this._metricsClient.multi();
 
@@ -149,36 +165,43 @@ export class RedisManager {
       multi.hincrby(previousHash, Utilities.getLabelActiveCountField(previousLabel), -1);
     }
 
-    await multi.exec();
+    return Q.Promise((resolve, reject) => {
+      multi.exec((err, results) => {
+        if (err) return reject(err);
+        resolve(results);
+      });
+    }).then(() => {});
   }
 
-  async removeDeploymentKeyClientActiveLabel(deploymentKey: string, clientUniqueId: string): Promise<void> {
-    if (!this.isEnabled) return;
+  removeDeploymentKeyClientActiveLabel(deploymentKey: string, clientUniqueId: string): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
-    await this._metricsClient.hdel(Utilities.getDeploymentKeyClientsHash(deploymentKey), clientUniqueId);
+    return Q(this._metricsClient.hdel(Utilities.getDeploymentKeyClientsHash(deploymentKey), clientUniqueId)).then(() => {});
   }
 
-  async invalidateCache(expiryKey: string): Promise<void> {
-    if (!this.isEnabled) return;
+  invalidateCache(expiryKey: string): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
-    await this._opsClient.del(expiryKey);
+    return Q(this._opsClient.del(expiryKey)).then(() => {});
   }
 
-  async close(): Promise<void> {
-    if (this._opsClient) await this._opsClient.quit();
-    if (this._metricsClient) await this._metricsClient.quit();
+  close(): Q.Promise<void> {
+    return Q.all([
+      this._opsClient ? Q(this._opsClient.quit()) : Q.resolve(),
+      this._metricsClient ? Q(this._metricsClient.quit()) : Q.resolve(),
+    ]).then(() => {});
   }
 
   /* deprecated */
-  async getCurrentActiveLabel(deploymentKey: string, clientUniqueId: string): Promise<string | null> {
-    if (!this.isEnabled) return null;
+  getCurrentActiveLabel(deploymentKey: string, clientUniqueId: string): Q.Promise<string | null> {
+    if (!this.isEnabled) return Q.resolve(null);
 
-    return this._metricsClient.hget(Utilities.getDeploymentKeyClientsHash(deploymentKey), clientUniqueId);
+    return Q(this._metricsClient.hget(Utilities.getDeploymentKeyClientsHash(deploymentKey), clientUniqueId));
   }
 
   /* deprecated */
-  async updateActiveAppForClient(deploymentKey: string, clientUniqueId: string, toLabel: string, fromLabel?: string): Promise<void> {
-    if (!this.isEnabled) return;
+  updateActiveAppForClient(deploymentKey: string, clientUniqueId: string, toLabel: string, fromLabel?: string): Q.Promise<void> {
+    if (!this.isEnabled) return Q.resolve();
 
     const multi = this._metricsClient.multi();
     const deploymentKeyClientsHash = Utilities.getDeploymentKeyClientsHash(deploymentKey);
@@ -191,6 +214,11 @@ export class RedisManager {
       multi.hincrby(deploymentKeyLabelsHash, Utilities.getLabelActiveCountField(fromLabel), -1);
     }
 
-    await multi.exec();
+    return Q.Promise((resolve, reject) => {
+      multi.exec((err, results) => {
+        if (err) return reject(err);
+        resolve(results);
+      });
+    }).then(() => {});
   }
 }
